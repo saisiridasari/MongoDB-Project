@@ -7,7 +7,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔹 MongoDB Connection
+/* ==============================
+   MongoDB Connection
+============================== */
+
 const client = new MongoClient("mongodb://localhost:27017");
 let db;
 
@@ -18,22 +21,27 @@ async function connectDB() {
     console.log("MongoDB Connected");
   } catch (err) {
     console.error("MongoDB Connection Error:", err);
+    process.exit(1);
   }
 }
 
 connectDB();
 
-
-// 🔹 Function to Generate MongoDB Filter JSON using Ollama
 async function generateMongoQuery(nlQuery) {
   const prompt = `
-You are an AI that converts natural language into MongoDB filter JSON.
+You convert natural language into MongoDB queries.
 
-IMPORTANT RULES:
+STRICT RULES:
 - Return ONLY valid JSON.
 - Do NOT explain anything.
-- Do NOT include db.collection.find.
-- Only return the filter object.
+- Do NOT use markdown.
+- Return an object in EXACT format:
+
+{
+  "type": "find" OR "aggregation",
+  "filter": {}   (if type = find)
+  "pipeline": [] (if type = aggregation)
+}
 
 Collection: employees
 
@@ -52,11 +60,34 @@ Schema:
 }
 
 Examples:
-Input: employees with salary greater than 60000
-Output: { "salary": { "$gt": 60000 } }
 
 Input: male employees
-Output: { "gender": "Male" }
+Output:
+{
+  "type": "find",
+  "filter": { "gender": "Male" }
+}
+
+Input: employees with salary greater than 60000
+Output:
+{
+  "type": "find",
+  "filter": { "salary": { "$gt": 60000 } }
+}
+
+Input: average salary by job category
+Output:
+{
+  "type": "aggregation",
+  "pipeline": [
+    {
+      "$group": {
+        "_id": "$jobcat",
+        "averageSalary": { "$avg": "$salary" }
+      }
+    }
+  ]
+}
 
 Now convert this query:
 
@@ -64,7 +95,7 @@ ${nlQuery}
 `;
 
   const response = await axios.post("http://localhost:11434/api/generate", {
-    model: "phi3",
+    model: "mistral",
     prompt: prompt,
     stream: false
   });
@@ -72,28 +103,33 @@ ${nlQuery}
   return response.data.response;
 }
 
+/* ==============================
+   Safe JSON Extraction
+============================== */
 
-// 🔹 Extract JSON safely from model output
 function extractJSON(text) {
-  // Remove markdown formatting
-  text = text
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .trim();
+  try {
+    text = text
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
 
-  // Extract JSON object
-  const match = text.match(/\{[\s\S]*\}/);
+    const match = text.match(/\{[\s\S]*\}/);
 
-  if (!match) {
-    throw new Error("No valid JSON found");
+    if (!match) {
+      throw new Error("No valid JSON found in model output");
+    }
+
+    return JSON.parse(match[0]);
+  } catch (error) {
+    throw new Error("Invalid JSON format returned by model");
   }
-
-  return JSON.parse(match[0]);
 }
 
+/* ==============================
+   Main Query Endpoint
+============================== */
 
-
-// 🔹 Main API Endpoint
 app.post("/query", async (req, res) => {
   try {
     const { query } = req.body;
@@ -102,36 +138,66 @@ app.post("/query", async (req, res) => {
       return res.status(400).json({ error: "Query is required" });
     }
 
-    // Step 1: Get model output
+    // Step 1: Get model-generated query
     const rawOutput = await generateMongoQuery(query);
     console.log("Model Output:", rawOutput);
 
-    // Step 2: Extract filter JSON
-    const filter = extractJSON(rawOutput);
+    // Step 2: Extract structured JSON
+    const parsedQuery = extractJSON(rawOutput);
 
-    // Step 3: Execute MongoDB query
-    const results = await db
-      .collection("employees")
-      .find(filter)
-      .limit(100)
-      .toArray();
+    if (!parsedQuery.type) {
+      throw new Error("Query type missing from model response");
+    }
 
+    let results;
+
+    // Step 3: Execute Query Based on Type
+    if (parsedQuery.type === "aggregation") {
+
+      if (!Array.isArray(parsedQuery.pipeline)) {
+        throw new Error("Invalid aggregation pipeline format");
+      }
+
+      results = await db
+        .collection("employees")
+        .aggregate(parsedQuery.pipeline)
+        .toArray();
+
+    } else if (parsedQuery.type === "find") {
+
+      if (!parsedQuery.filter || typeof parsedQuery.filter !== "object") {
+        throw new Error("Invalid filter format");
+      }
+
+      results = await db
+        .collection("employees")
+        .find(parsedQuery.filter)
+        .limit(100)
+        .toArray();
+
+    } else {
+      throw new Error("Invalid query type returned by model");
+    }
+
+    // Step 4: Send Response
     res.json({
-      generatedFilter: filter,
+      generatedQuery: parsedQuery,
       count: results.length,
       results
     });
 
   } catch (error) {
-  console.error("FULL ERROR:", error);
-  res.status(500).json({
-    error: error.message
-  });
-}
+    console.error("FULL ERROR:", error);
+    res.status(500).json({
+      error: error.message
+    });
+  }
 });
 
+/* ==============================
+   Start Server
+============================== */
 
-// 🔹 Start Server
 app.listen(5000, () => {
   console.log("Server running on http://localhost:5000");
 });
