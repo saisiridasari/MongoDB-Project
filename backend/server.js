@@ -27,37 +27,31 @@ async function connectDB() {
 
 connectDB();
 
+/* ==============================
+   Generate MongoDB Query via LLM
+============================== */
+
 async function generateMongoQuery(nlQuery) {
   const prompt = `
-You convert natural language into MongoDB queries.
+Return ONLY valid JSON.
+No explanation.
+No markdown.
 
-STRICT RULES:
-- Return ONLY valid JSON.
-- Do NOT explain anything.
-- Do NOT use markdown.
-- Return an object in EXACT format:
-
+Format EXACTLY:
 {
-  "type": "find" OR "aggregation",
-  "filter": {}   (if type = find)
-  "pipeline": [] (if type = aggregation)
+  "type": "find" or "aggregation",
+  "filter": {},
+  "pipeline": []
 }
 
-Collection: employees
+Rules:
+- Use $and for multiple conditions
+- Use $gt, $lt, $gte, $lte correctly
+- Combine conditions logically
+- Use correct field names
 
-Schema:
-{
-  id: number,
-  gender: string,
-  bdate: date,
-  educ: number,
-  jobcat: string,
-  salary: number,
-  salbegin: number,
-  jobtime: number,
-  prevexp: number,
-  minority: string
-}
+Fields:
+gender, salary, jobcat, bdate, educ, salbegin, jobtime, prevexp, minority
 
 Examples:
 
@@ -75,6 +69,19 @@ Output:
   "filter": { "salary": { "$gt": 60000 } }
 }
 
+Input: male employees with salary > 60000 and experience > 5
+Output:
+{
+  "type": "find",
+  "filter": {
+    "$and": [
+      { "gender": "Male" },
+      { "salary": { "$gt": 60000 } },
+      { "prevexp": { "$gt": 5 } }
+    ]
+  }
+}
+
 Input: average salary by job category
 Output:
 {
@@ -89,8 +96,7 @@ Output:
   ]
 }
 
-Now convert this query:
-
+Query:
 ${nlQuery}
 `;
 
@@ -104,7 +110,7 @@ ${nlQuery}
 }
 
 /* ==============================
-   Safe JSON Extraction
+   Extract JSON Safely
 ============================== */
 
 function extractJSON(text) {
@@ -117,17 +123,17 @@ function extractJSON(text) {
     const match = text.match(/\{[\s\S]*\}/);
 
     if (!match) {
-      throw new Error("No valid JSON found in model output");
+      throw new Error("No valid JSON found");
     }
 
     return JSON.parse(match[0]);
   } catch (error) {
-    throw new Error("Invalid JSON format returned by model");
+    throw new Error("Invalid JSON format from model");
   }
 }
 
 /* ==============================
-   Main Query Endpoint
+   Main API
 ============================== */
 
 app.post("/query", async (req, res) => {
@@ -138,24 +144,27 @@ app.post("/query", async (req, res) => {
       return res.status(400).json({ error: "Query is required" });
     }
 
-    // Step 1: Get model-generated query
+    // Step 1: Get LLM output
     const rawOutput = await generateMongoQuery(query);
     console.log("Model Output:", rawOutput);
 
-    // Step 2: Extract structured JSON
+    // Step 2: Extract JSON
     const parsedQuery = extractJSON(rawOutput);
 
     if (!parsedQuery.type) {
-      throw new Error("Query type missing from model response");
+      throw new Error("Missing query type");
     }
 
     let results;
 
-    // Step 3: Execute Query Based on Type
+    /* ==============================
+       Execute Query
+    ============================== */
+
     if (parsedQuery.type === "aggregation") {
 
       if (!Array.isArray(parsedQuery.pipeline)) {
-        throw new Error("Invalid aggregation pipeline format");
+        throw new Error("Invalid pipeline format");
       }
 
       results = await db
@@ -176,10 +185,13 @@ app.post("/query", async (req, res) => {
         .toArray();
 
     } else {
-      throw new Error("Invalid query type returned by model");
+      throw new Error("Invalid query type");
     }
 
-    // Step 4: Send Response
+    /* ==============================
+       Response
+    ============================== */
+
     res.json({
       generatedQuery: parsedQuery,
       count: results.length,

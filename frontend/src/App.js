@@ -7,6 +7,8 @@ function App() {
   const [results, setResults] = useState([]);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [queryType, setQueryType] = useState("");
+  const [generatedQuery, setGeneratedQuery] = useState(null); // NEW
 
   const handleSearch = async () => {
     if (!query) return;
@@ -20,6 +22,8 @@ function App() {
 
       setResults(response.data.results);
       setCount(response.data.count);
+      setQueryType(response.data.generatedQuery.type);
+      setGeneratedQuery(response.data.generatedQuery); // NEW
     } catch (error) {
       alert("Error fetching results");
     }
@@ -48,33 +52,72 @@ function App() {
 
       {!loading && count > 0 && (
         <div className="results-section">
+
+          {/* 🔹 Result Count + Query Type */}
           <div className="result-header">
             <span>Results Found: {count}</span>
+            <span className="query-type">
+              Type: {queryType.toUpperCase()}
+            </span>
           </div>
 
+          {/* 🔹 Generated Query Display */}
+          {generatedQuery && (
+            <div className="query-box">
+              <h3>Generated MongoDB Query</h3>
+              <pre>
+                {JSON.stringify(generatedQuery, null, 2)}
+              </pre>
+            </div>
+          )}
+
           <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Gender</th>
-                  <th>Job Category</th>
-                  <th>Salary</th>
-                  <th>Experience</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((emp) => (
-                  <tr key={emp._id}>
-                    <td>{emp.id}</td>
-                    <td>{emp.gender}</td>
-                    <td>{emp.jobcat}</td>
-                    <td>${emp.salary}</td>
-                    <td>{emp.prevexp}</td>
+
+            {/* 🔹 AGGREGATION TABLE */}
+            {queryType === "aggregation" ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Average Salary</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {results.map((item, index) => (
+                    <tr key={index}>
+                      <td>{item._id}</td>
+                      <td>${item.averageSalary?.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+
+            /* 🔹 NORMAL QUERY TABLE */
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Gender</th>
+                    <th>Job Category</th>
+                    <th>Salary</th>
+                    <th>Experience</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.map((emp) => (
+                    <tr key={emp._id}>
+                      <td>{emp.id}</td>
+                      <td>{emp.gender}</td>
+                      <td>{emp.jobcat}</td>
+                      <td>${emp.salary}</td>
+                      <td>{emp.prevexp}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
           </div>
         </div>
       )}
