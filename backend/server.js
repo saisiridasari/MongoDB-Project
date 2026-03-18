@@ -7,10 +7,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ==============================
-   MongoDB Connection
-============================== */
-
 const client = new MongoClient("mongodb://localhost:27017");
 let db;
 
@@ -26,10 +22,6 @@ async function connectDB() {
 }
 
 connectDB();
-
-/* ==============================
-   Generate MongoDB Query via LLM
-============================== */
 
 async function generateMongoQuery(nlQuery) {
   const prompt = `
@@ -109,10 +101,6 @@ ${nlQuery}
   return response.data.response;
 }
 
-/* ==============================
-   Extract JSON Safely
-============================== */
-
 function extractJSON(text) {
   try {
     text = text
@@ -131,10 +119,6 @@ function extractJSON(text) {
     throw new Error("Invalid JSON format from model");
   }
 }
-
-/* ==============================
-   Main API
-============================== */
 
 app.post("/query", async (req, res) => {
   try {
@@ -156,10 +140,6 @@ app.post("/query", async (req, res) => {
     }
 
     let results;
-
-    /* ==============================
-       Execute Query
-    ============================== */
 
     if (parsedQuery.type === "aggregation") {
 
@@ -188,10 +168,6 @@ app.post("/query", async (req, res) => {
       throw new Error("Invalid query type");
     }
 
-    /* ==============================
-       Response
-    ============================== */
-
     res.json({
       generatedQuery: parsedQuery,
       count: results.length,
@@ -205,10 +181,6 @@ app.post("/query", async (req, res) => {
     });
   }
 });
-
-/* ==============================
-   Start Server
-============================== */
 
 app.listen(5000, () => {
   console.log("Server running on http://localhost:5000");
